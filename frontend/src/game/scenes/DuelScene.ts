@@ -12,6 +12,13 @@ export class DuelScene extends Phaser.Scene {
   private combo = 0;
   private multiplier = 1;
 
+  private shotsFired = 0;
+  private hits = 0;
+  private headshots = 0;
+  private misses = 0;
+
+  private highScore = 0;
+
   private scoreText!: Phaser.GameObjects.Text;
   private comboText!: Phaser.GameObjects.Text;
   private timerText!: Phaser.GameObjects.Text;
@@ -28,84 +35,64 @@ export class DuelScene extends Phaser.Scene {
     super("DuelScene");
   }
 
+  preload() {
+    this.load.image("dojo_back", "assets/dojo_back.png");
+    this.load.image("dojo_mid", "assets/dojo_mid.png");
+    this.load.image("dojo_floor", "assets/dojo_floor.png");
+  }
+
   create() {
-    this.createBackgroundLayers();
-    this.createUI();
+
+    this.highScore = Number(localStorage.getItem("cyber_highscore") || 0);
+
+    this.input.setDefaultCursor("crosshair");
+
+    const { width, height } = this.scale;
+
+    const back = this.add.image(width/2, height/2, "dojo_back")
+      .setDisplaySize(width, height).setDepth(0);
+
+    const mid = this.add.image(width/2, height/2, "dojo_mid")
+      .setDisplaySize(width, height).setDepth(1);
+
+    const floor = this.add.image(width/2, height/2, "dojo_floor")
+      .setDisplaySize(width, height).setDepth(2);
+
+    this.tweens.add({
+      targets: mid,
+      alpha: 0.8,
+      yoyo: true,
+      repeat: -1,
+      duration: 1800
+    });
+
+    this.vignette = this.add.rectangle(width/2, height/2, width, height, 0x000000, 0.2)
+      .setDepth(50);
+
+    this.scoreText = this.add.text(20, 20, "Score: 0", {
+      fontSize: "22px",
+      color: "#00ffff"
+    }).setDepth(100);
+
+    this.comboText = this.add.text(width/2, 60, "COMBO x1", {
+      fontSize: "22px",
+      color: "#ffffff"
+    }).setOrigin(0.5).setDepth(100);
+
+    this.timerText = this.add.text(width-20, 20, "20", {
+      fontSize: "22px",
+      color: "#ff00ff"
+    }).setOrigin(1,0).setDepth(100);
+
     this.createCrosshair();
     this.startMatchTimer();
     this.startSpawning();
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      if (this.matchActive) {
-        this.handleShot(pointer.x, pointer.y);
-      }
+      if (!this.matchActive) return;
+      this.shotsFired++;
+      this.handleShot(pointer.x, pointer.y);
     });
-  }
-
-  // ================= BACKGROUND =================
-
-  private createBackgroundLayers() {
-
-    // Base dark
-    this.add.rectangle(180, 320, 360, 640, 0x080014);
-
-    // Neon glow pulse
-    const glow = this.add.circle(180, 180, 220, 0x6a00ff, 0.12);
-    this.tweens.add({
-      targets: glow,
-      alpha: 0.25,
-      yoyo: true,
-      repeat: -1,
-      duration: 2500
-    });
-
-    // Dojo wall panel
-    const wall = this.add.rectangle(180, 220, 360, 220, 0x120022);
-    wall.setStrokeStyle(3, 0xff00ff);
-
-    // Floor gradient depth
-    const floor = this.add.rectangle(180, 460, 360, 300, 0x000000, 0.4);
-
-    // Neon floor lines
-    for (let i = 0; i < 6; i++) {
-      const line = this.add.line(
-        180,
-        380 + i * 25,
-        0,
-        0,
-        360,
-        0,
-        0x00ffff
-      );
-      line.setAlpha(0.2 - i * 0.02);
-    }
-
-    // Vignette
-    this.vignette = this.add.rectangle(180, 320, 360, 640, 0x000000, 0.2);
-  }
-
-  // ================= UI =================
-
-  private createUI() {
-    this.scoreText = this.add.text(20, 20, `Score: 0`, {
-      fontSize: "18px",
-      color: "#00ffff",
-    });
-
-    this.comboText = this.add.text(180, 60, `COMBO x1`, {
-      fontSize: "20px",
-      color: "#ffffff",
-    }).setOrigin(0.5);
-
-    this.timerText = this.add.text(300, 20, `20`, {
-      fontSize: "18px",
-      color: "#ff00ff",
-    });
-  }
-
-  private updateUI() {
-    this.scoreText.setText(`Score: ${this.score}`);
-    this.comboText.setText(`COMBO x${this.multiplier.toFixed(2)}`);
   }
 
   // ================= TIMER =================
@@ -117,6 +104,7 @@ export class DuelScene extends Phaser.Scene {
       delay: 1000,
       loop: true,
       callback: () => {
+
         this.timeLeft--;
         this.timerText.setText(`${this.timeLeft}`);
 
@@ -141,7 +129,10 @@ export class DuelScene extends Phaser.Scene {
   private scheduleNextSpawn() {
     if (!this.matchActive) return;
 
-    const delay = Phaser.Math.Between(400, 1100);
+    let delay = Phaser.Math.Between(600, 1000);
+
+    if (this.timeLeft <= 10) delay = Phaser.Math.Between(350, 700);
+    if (this.timeLeft <= 5) delay = Phaser.Math.Between(150, 350);
 
     this.time.delayedCall(delay, () => {
       this.spawnEnemy();
@@ -150,40 +141,27 @@ export class DuelScene extends Phaser.Scene {
   }
 
   private spawnEnemy() {
-    const x = Phaser.Math.Between(80, 280);
+    const x = Phaser.Math.Between(80, this.scale.width - 80);
     const y = 130;
 
-    let enemy: EnemyBase;
+    const enemy = this.isRanked
+      ? new NinjaEnemy(this, x, y)
+      : new SoldierEnemy(this, x, y);
 
-    if (this.isRanked) {
-      enemy = new NinjaEnemy(this, x, y);
-    } else {
-      enemy = new SoldierEnemy(this, x, y);
-    }
-
-    // Shadow
-    const shadow = this.add.ellipse(x, 500, 40, 10, 0x000000, 0.4);
-    (enemy as any).shadow = shadow;
+    enemy.setDepth(10);
 
     (enemy as any).drift = Phaser.Math.FloatBetween(-0.6, 0.6);
-    (enemy as any).willDash = Phaser.Math.Between(0, 100) < 30;
-    (enemy as any).dashCooldown = Phaser.Math.Between(800, 1500);
+    (enemy as any).willDash = Phaser.Math.Between(0,100) < 35;
+    (enemy as any).dashCooldown = Phaser.Math.Between(600, 1200);
 
     this.enemies.push(enemy);
   }
 
   // ================= SHOOT =================
 
-  private handleShot(x: number, y: number) {
+  private handleShot(x:number, y:number) {
 
-    // Crosshair jump
-    this.tweens.add({
-      targets: this.crosshair,
-      x,
-      y,
-      duration: 60,
-      ease: "Power2"
-    });
+    this.crosshair.setPosition(x,y);
 
     let hitSomething = false;
 
@@ -194,13 +172,13 @@ export class DuelScene extends Phaser.Scene {
       const bodyBounds = enemy.getBodyBounds();
 
       if (Phaser.Geom.Rectangle.Contains(headBounds, x, y)) {
-        this.registerHit(enemy, "head", x, y);
+        this.registerHit(enemy,"head");
         hitSomething = true;
         break;
       }
 
       if (Phaser.Geom.Rectangle.Contains(bodyBounds, x, y)) {
-        this.registerHit(enemy, "body", x, y);
+        this.registerHit(enemy,"body");
         hitSomething = true;
         break;
       }
@@ -209,126 +187,130 @@ export class DuelScene extends Phaser.Scene {
     if (!hitSomething) {
       this.combo = 0;
       this.multiplier = 1;
+      this.misses++;
       this.updateUI();
     }
   }
 
-  private registerHit(enemy: EnemyBase, type: "head" | "body", x: number, y: number) {
+  private registerHit(enemy:EnemyBase, type:"head"|"body") {
 
     enemy.hit(type);
 
-    // Particle burst
-    const burst = this.add.circle(x, y, 6, 0xffff00);
-    this.tweens.add({
-      targets: burst,
-      scale: 3,
-      alpha: 0,
-      duration: 300,
-      onComplete: () => burst.destroy()
-    });
+    this.hits++;
+    if(type==="head") this.headshots++;
 
     this.combo++;
-    this.multiplier = 1 + this.combo * 0.05;
+    this.multiplier = 1 + this.combo*0.05;
 
-    if (type === "head") {
-      this.score += Math.floor(2 * this.multiplier);
-      this.cameras.main.shake(120, 0.012);
-    } else {
-      this.score += Math.floor(1 * this.multiplier);
-      this.cameras.main.shake(50, 0.006);
-    }
+    this.score += type==="head"
+      ? Math.floor(2*this.multiplier)
+      : Math.floor(1*this.multiplier);
 
     this.updateUI();
   }
 
-  // ================= UPDATE =================
+  private updateUI(){
+    this.scoreText.setText(`Score: ${this.score}`);
+    this.comboText.setText(`COMBO x${this.multiplier.toFixed(2)}`);
+  }
 
-  update(_, delta: number) {
-    if (!this.matchActive) return;
+  update(_,delta:number){
+    if(!this.matchActive) return;
 
-    this.enemies.forEach(enemy => {
-      if (!enemy.isAlive) return;
-
-      enemy.moveForward(0.9);
+    this.enemies.forEach(enemy=>{
+      if(!enemy.isAlive) return;
+      enemy.moveForward(1.0);
       enemy.x += (enemy as any).drift;
-
-      // Shadow follow
-      if ((enemy as any).shadow) {
-        (enemy as any).shadow.x = enemy.x;
-      }
-
-      // Dash
-      if ((enemy as any).willDash) {
-        (enemy as any).dashCooldown -= delta;
-        if ((enemy as any).dashCooldown <= 0) {
-          const dash = Phaser.Math.Between(-60, 60);
-          this.tweens.add({
-            targets: enemy,
-            x: enemy.x + dash,
-            duration: 150,
-            ease: "Power3"
-          });
-          (enemy as any).dashCooldown = Phaser.Math.Between(1200, 2000);
-        }
-      }
-
-      if (enemy.y > 500) {
-        enemy.destroy();
-        enemy.isAlive = false;
-      }
     });
   }
 
-  // ================= END =================
+  // ================= END SCREEN =================
 
-  private endMatch() {
-    this.matchActive = false;
+  private endMatch(){
 
-    this.enemies.forEach(e => e.destroy());
-    this.enemies = [];
+    this.matchActive=false;
+    this.enemies.forEach(e=>e.destroy());
 
-    const overlay = this.add.rectangle(180, 320, 360, 640, 0x000000, 0.75);
+    const {width,height} = this.scale;
 
-    const title = this.add.text(180, 250, "MATCH OVER", {
-      fontSize: "28px",
-      color: "#ffffff",
-    }).setOrigin(0.5);
+    const overlay = this.add.rectangle(width/2,height/2,width,height,0x000000,0.85)
+      .setDepth(500);
 
-    const scoreText = this.add.text(180, 310, `Score: ${this.score}`, {
-      fontSize: "22px",
-      color: "#00ffff",
-    }).setOrigin(0.5);
+    const accuracy = this.shotsFired>0
+      ? Math.round((this.hits/this.shotsFired)*100)
+      : 0;
 
-    const backBtn = this.add.text(180, 380, "BACK TO SLOT", {
-      fontSize: "20px",
-      backgroundColor: "#ff00ff",
-      padding: { x: 20, y: 10 },
-    }).setOrigin(0.5).setInteractive();
+    const hsRate = this.hits>0
+      ? Math.round((this.headshots/this.hits)*100)
+      : 0;
 
-    backBtn.on("pointerdown", () => {
+    if(this.score > this.highScore){
+      this.highScore = this.score;
+      localStorage.setItem("cyber_highscore",this.score.toString());
+    }
+
+    const diff = this.score - this.highScore;
+
+    const grade = accuracy>85 ? "S"
+      : accuracy>70 ? "A"
+      : accuracy>50 ? "B"
+      : "C";
+
+    const panel = this.add.container(width/2,height/2).setDepth(600);
+
+    const bg = this.add.rectangle(0,0,520,700,0x111122)
+      .setStrokeStyle(3,0x00ffff);
+
+    panel.add(bg);
+
+    const textStyle = {fontSize:"22px",color:"#ffffff"};
+
+    panel.add(this.add.text(0,-300,"MATCH RESULT",{fontSize:"28px",color:"#00ffff"}).setOrigin(0.5));
+
+    panel.add(this.add.text(0,-240,`Grade: ${grade}`,{fontSize:"26px",color:"#ff00ff"}).setOrigin(0.5));
+    panel.add(this.add.text(0,-190,`Score: ${this.score}`,textStyle).setOrigin(0.5));
+    panel.add(this.add.text(0,-150,`Highscore: ${this.highScore}`,textStyle).setOrigin(0.5));
+    panel.add(this.add.text(0,-110,`Accuracy: ${accuracy}%`,textStyle).setOrigin(0.5));
+    panel.add(this.add.text(0,-70,`Headshot Rate: ${hsRate}%`,textStyle).setOrigin(0.5));
+    panel.add(this.add.text(0,-30,`Misses: ${this.misses}`,textStyle).setOrigin(0.5));
+
+    panel.add(this.add.text(0,20,`Vs Highscore: ${diff>=0?"+":""}${diff}`,textStyle).setOrigin(0.5));
+
+    const replayBtn = this.add.text(0,120,"PLAY AGAIN",{fontSize:"24px",backgroundColor:"#00ffff",color:"#000"})
+      .setOrigin(0.5).setPadding(15).setInteractive();
+
+    const backBtn = this.add.text(0,190,"BACK TO SLOT",{fontSize:"22px",backgroundColor:"#ff00ff",color:"#000"})
+      .setOrigin(0.5).setPadding(12).setInteractive();
+
+    replayBtn.on("pointerdown",()=>{
+      this.scene.restart();
+    });
+
+    backBtn.on("pointerdown",()=>{
       this.scene.start("SlotScene");
     });
-  }
 
-  // ================= CROSSHAIR =================
+    panel.add(replayBtn);
+    panel.add(backBtn);
 
-  private createCrosshair() {
-    const circle = this.add.circle(180, 350, 18, 0x00ffff, 0.2)
-      .setStrokeStyle(2, 0x00ffff);
-
-    const hLine = this.add.line(180, 350, -12, 0, 12, 0, 0xffffff);
-    const vLine = this.add.line(180, 350, 0, -12, 0, 12, 0xffffff);
-
-    this.crosshair = this.add.container(180, 350, [circle, hLine, vLine]);
+    panel.setScale(0);
 
     this.tweens.add({
-      targets: circle,
-      scale: 1.1,
-      yoyo: true,
-      repeat: -1,
-      duration: 1000
+      targets: panel,
+      scale:1,
+      duration:400,
+      ease:"Back.Out"
     });
   }
+
+  private createCrosshair(){
+    const circle = this.add.circle(0,0,18,0x00ffff,0.2)
+      .setStrokeStyle(2,0x00ffff);
+
+    const hLine = this.add.line(0,0,-12,0,12,0,0xffffff);
+    const vLine = this.add.line(0,0,0,-12,0,12,0xffffff);
+
+    this.crosshair = this.add.container(300,400,[circle,hLine,vLine])
+      .setDepth(1000);
+  }
 }
-
-
